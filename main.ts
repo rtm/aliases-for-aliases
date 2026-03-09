@@ -11,6 +11,8 @@ export default class AliasesForAliasesPlugin extends Plugin {
     private customAliases: Map<string, Set<string>> = new Map();
     // Map of alias to file path for quick lookup
     private aliasToFilePath: Map<string, string> = new Map();
+    // Track property names already registered as list type
+    private registeredListProperties: Set<string> = new Set();
     // Store original metadataCache methods for restoration
     private originalGetFirstLinkpathDest: Function;
     private originalGetLinkSuggestions: Function;
@@ -140,6 +142,9 @@ export default class AliasesForAliasesPlugin extends Plugin {
         for (const key of Object.keys(cache.frontmatter)) {
             if (!key.startsWith('aliases:')) continue;
 
+            // Ensure Obsidian treats this property as a list type
+            this.ensureListType(key);
+
             const propertyValue = cache.frontmatter[key];
 
             if (Array.isArray(propertyValue)) {
@@ -154,6 +159,17 @@ export default class AliasesForAliasesPlugin extends Plugin {
         }
 
         return customAliasesForFile;
+    }
+
+    ensureListType(property: string) {
+        if (this.registeredListProperties.has(property)) return;
+        try {
+            // @ts-ignore - metadataTypeManager is not in the public API
+            this.app.metadataTypeManager.setType(property, 'multitext');
+            this.registeredListProperties.add(property);
+        } catch (e) {
+            console.warn(`Aliases for Aliases: could not register "${property}" as list type`, e);
+        }
     }
 
     processFileAliases(file: TFile, cache: CachedMetadata) {

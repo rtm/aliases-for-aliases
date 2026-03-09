@@ -3,8 +3,8 @@
 	"name": "Aliases for aliases",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Register custom frontmatter properties as aliases in Obsidian",
-	"author": "Vibesidian Plugin",
-	"authorUrl": "https://github.com/iansinnott/vibesidian",
+	"description": "Support 'aliases:*' properties as aliases",
+	"author": "Bob Myers",
+	"authorUrl": "https://github.com/rtm",
 	"isDesktopOnly": false
 }

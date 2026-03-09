@@ -3,17 +3,10 @@ import {
     TFile,
     CachedMetadata,
     Notice,
-    MarkdownView,
 } from 'obsidian';
-import {
-    AliasesForAliasesSettings,
-    DEFAULT_SETTINGS,
-    AliasesForAliasesSettingTab
-} from './settings';
+import { AliasesForAliasesSettingTab } from './settings';
 
 export default class AliasesForAliasesPlugin extends Plugin {
-    settings: AliasesForAliasesSettings;
-
     // Store custom aliases for reference
     private customAliases: Map<string, Set<string>> = new Map();
     // Map of alias to file path for quick lookup
@@ -25,8 +18,6 @@ export default class AliasesForAliasesPlugin extends Plugin {
     async onload() {
         console.log('Loading Aliases for Aliases plugin');
 
-        await this.loadSettings();
-
         // Add settings tab
         this.addSettingTab(new AliasesForAliasesSettingTab(this.app, this));
 
@@ -34,7 +25,6 @@ export default class AliasesForAliasesPlugin extends Plugin {
         this.originalGetFirstLinkpathDest = this.app.metadataCache.getFirstLinkpathDest.bind(this.app.metadataCache);
         // @ts-ignore - monkey patching
         this.app.metadataCache.getFirstLinkpathDest = (linkpath: string, sourcePath: string): TFile | null => {
-            // Check our custom aliases first
             const filePath = this.aliasToFilePath.get(linkpath);
             if (filePath) {
                 const file = this.app.vault.getAbstractFileByPath(filePath);
@@ -121,18 +111,8 @@ export default class AliasesForAliasesPlugin extends Plugin {
         // @ts-ignore
         this.app.metadataCache.getLinkSuggestions = this.originalGetLinkSuggestions;
 
-        // Clear our custom aliases
         this.customAliases.clear();
         this.aliasToFilePath.clear();
-    }
-
-    async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    }
-
-    async saveSettings() {
-        await this.saveData(this.settings);
-        this.refreshAliases();
     }
 
     refreshAliases() {
@@ -157,21 +137,19 @@ export default class AliasesForAliasesPlugin extends Plugin {
 
         if (!cache.frontmatter) return customAliasesForFile;
 
-        for (const property of this.settings.aliasProperties) {
-            if (cache.frontmatter[property]) {
-                const propertyValue = cache.frontmatter[property];
+        for (const key of Object.keys(cache.frontmatter)) {
+            if (!key.startsWith('aliases:')) continue;
 
-                if (Array.isArray(propertyValue)) {
-                    propertyValue.forEach(value => {
-                        if (typeof value === 'string' && value.trim()) {
-                            customAliasesForFile.add(value.trim());
-                        }
-                    });
-                } else if (typeof propertyValue === 'string') {
-                    if (propertyValue.trim()) {
-                        customAliasesForFile.add(propertyValue.trim());
+            const propertyValue = cache.frontmatter[key];
+
+            if (Array.isArray(propertyValue)) {
+                propertyValue.forEach(value => {
+                    if (typeof value === 'string' && value.trim()) {
+                        customAliasesForFile.add(value.trim());
                     }
-                }
+                });
+            } else if (typeof propertyValue === 'string' && propertyValue.trim()) {
+                customAliasesForFile.add(propertyValue.trim());
             }
         }
 

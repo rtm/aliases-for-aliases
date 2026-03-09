@@ -1,14 +1,5 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab } from 'obsidian';
 import AliasesForAliasesPlugin from './main';
-
-export interface AliasesForAliasesSettings {
-    // Array of frontmatter properties to treat as aliases
-    aliasProperties: string[];
-}
-
-export const DEFAULT_SETTINGS: AliasesForAliasesSettings = {
-    aliasProperties: ['keywords', 'tags']
-};
 
 export class AliasesForAliasesSettingTab extends PluginSettingTab {
     plugin: AliasesForAliasesPlugin;
@@ -22,28 +13,11 @@ export class AliasesForAliasesSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Aliases for aliases - Settings' });
-
-        new Setting(containerEl)
-            .setName('Frontmatter properties to treat as aliases')
-            .setDesc('Enter frontmatter properties to be treated as aliases (comma-separated)')
-            .addText(text => text
-                .setPlaceholder('keywords, tags, etc.')
-                .setValue(this.plugin.settings.aliasProperties.join(', '))
-                .onChange(async (value) => {
-                    // Split by comma and trim whitespace
-                    this.plugin.settings.aliasProperties = value
-                        .split(',')
-                        .map(prop => prop.trim())
-                        .filter(prop => prop.length > 0);
-                    
-                    await this.plugin.saveSettings();
-                    // Refresh aliases when settings change
-                    this.plugin.refreshAliases();
-                }));
-
-        containerEl.createEl('p', { 
-            text: 'Note: Changes will apply to all open files immediately and to other files when they are opened.'
+        containerEl.createEl('h2', { text: 'Aliases for Aliases' });
+        containerEl.createEl('p', {
+            text: 'Any frontmatter property whose name starts with "aliases:" will be treated as aliases. ' +
+                  'For example, "aliases:japanese" or "aliases:spanish" can hold alternate-language names ' +
+                  'that will be resolved as wikilinks throughout the vault.'
         });
     }
 }

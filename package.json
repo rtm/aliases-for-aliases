@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "deploy": "node esbuild.config.mjs production && cp main.js manifest.json styles.css \"/mnt/c/Users/User/OneDrive/rtm/Notes/Vault/.obsidian/plugins/aliases-for-aliases/\""
+    "deploy": "node esbuild.config.mjs production && node deploy.mjs"
   },
   "license": "MIT",
   "devDependencies": {

@@ -1,5 +1,5 @@
 {
-  "name": "vibe-aliases-for-aliases",
+  "name": "aliases-for-aliases",
   "version": "1.0.0",
   "description": "Register custom frontmatter properties as aliases in Obsidian",
   "main": "main.js",

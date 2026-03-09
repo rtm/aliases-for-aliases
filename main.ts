@@ -3,61 +3,8 @@ import {
     TFile,
     CachedMetadata,
     Notice,
-    EditorSuggest,
-    EditorSuggestContext,
-    EditorSuggestTriggerInfo,
-    Editor,
-    EditorPosition,
 } from 'obsidian';
 import { AliasesForAliasesSettingTab } from './settings';
-
-interface AliasSuggestion {
-    alias: string;
-    file: TFile;
-}
-
-class AliasEditorSuggest extends EditorSuggest<AliasSuggestion> {
-    private plugin: AliasesForAliasesPlugin;
-
-    constructor(plugin: AliasesForAliasesPlugin) {
-        super(plugin.app);
-        this.plugin = plugin;
-    }
-
-    onTrigger(cursor: EditorPosition, editor: Editor, _file: TFile): EditorSuggestTriggerInfo | null {
-        const line = editor.getLine(cursor.line).substring(0, cursor.ch);
-        const match = line.match(/\[\[([^\]]+)$/);
-        if (!match) return null;
-        const query = match[1];
-        return {
-            start: { line: cursor.line, ch: cursor.ch - query.length },
-            end: cursor,
-            query,
-        };
-    }
-
-    getSuggestions(context: EditorSuggestContext): AliasSuggestion[] {
-        const query = context.query.toLowerCase();
-        return Array.from(this.plugin.aliasToFilePath.entries())
-            .filter(([alias]) => alias.toLowerCase().contains(query))
-            .map(([alias, filePath]) => {
-                const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
-                if (!(file instanceof TFile)) return null;
-                return { alias, file };
-            })
-            .filter((s): s is AliasSuggestion => s !== null);
-    }
-
-    renderSuggestion(suggestion: AliasSuggestion, el: HTMLElement): void {
-        el.createEl('span', { text: suggestion.alias });
-        el.createEl('small', { text: ` — ${suggestion.file.basename}`, cls: 'suggestion-flair' });
-    }
-
-    selectSuggestion(suggestion: AliasSuggestion, _evt: MouseEvent | KeyboardEvent): void {
-        const { editor, start, end } = this.context!;
-        editor.replaceRange(`${suggestion.alias}]]`, start, end);
-    }
-}
 
 export default class AliasesForAliasesPlugin extends Plugin {
     // Store custom aliases for reference
@@ -66,8 +13,10 @@ export default class AliasesForAliasesPlugin extends Plugin {
     aliasToFilePath: Map<string, string> = new Map();
     // Track property names already registered as list type
     private registeredListProperties: Set<string> = new Set();
-    // Store original metadataCache method for restoration
+    // Store original methods for restoration
     private originalGetFirstLinkpathDest: Function;
+    private originalLinkSuggestGetSuggestions: Function | null = null;
+    private patchedLinkSuggest: any = null;
 
     async onload() {
         console.log('Loading Aliases for Aliases plugin');
@@ -75,12 +24,9 @@ export default class AliasesForAliasesPlugin extends Plugin {
         // Add settings tab
         this.addSettingTab(new AliasesForAliasesSettingTab(this.app, this));
 
-        // Register EditorSuggest for [[ autocomplete
-        this.registerEditorSuggest(new AliasEditorSuggest(this));
-
         // Patch getFirstLinkpathDest to resolve custom aliases when links are followed
         this.originalGetFirstLinkpathDest = this.app.metadataCache.getFirstLinkpathDest.bind(this.app.metadataCache);
-        // @ts-ignore - monkey patching
+        // @ts-ignore
         this.app.metadataCache.getFirstLinkpathDest = (linkpath: string, sourcePath: string): TFile | null => {
             const filePath = this.aliasToFilePath.get(linkpath);
             if (filePath) {
@@ -97,9 +43,10 @@ export default class AliasesForAliasesPlugin extends Plugin {
             })
         );
 
-        // Process all currently loaded files
+        // Process all currently loaded files and patch the built-in link suggester
         this.app.workspace.onLayoutReady(() => {
             this.refreshAliases();
+            this.patchLinkSuggester();
         });
 
         // Add command to refresh aliases
@@ -149,12 +96,48 @@ export default class AliasesForAliasesPlugin extends Plugin {
         );
     }
 
+    patchLinkSuggester() {
+        // @ts-ignore
+        const suggests = this.app.workspace.editorSuggest?.suggests ?? [];
+        const linkSuggest = suggests.find((s: any) => s.constructor.name === 'LinkSuggest');
+        if (!linkSuggest) {
+            console.warn('Aliases for Aliases: could not find built-in LinkSuggest to patch');
+            return;
+        }
+
+        this.originalLinkSuggestGetSuggestions = linkSuggest.getSuggestions.bind(linkSuggest);
+        this.patchedLinkSuggest = linkSuggest;
+
+        linkSuggest.getSuggestions = (context: any) => {
+            const original: any[] = this.originalLinkSuggestGetSuggestions!(context);
+            const query = (context.query ?? '').toLowerCase();
+            if (!query) return original;
+
+            const custom = Array.from(this.aliasToFilePath.entries())
+                .filter(([alias]) => alias.toLowerCase().includes(query))
+                .map(([alias, filePath]) => {
+                    const file = this.app.vault.getAbstractFileByPath(filePath);
+                    if (!(file instanceof TFile)) return null;
+                    return { file, alias, path: filePath };
+                })
+                .filter((s): s is { file: TFile, alias: string, path: string } => s !== null);
+
+            return [...original, ...custom];
+        };
+
+        console.log('Aliases for Aliases: patched built-in LinkSuggest');
+    }
+
     onunload() {
         console.log('Unloading Aliases for Aliases plugin');
 
-        // Restore original method
+        // Restore original methods
         // @ts-ignore
         this.app.metadataCache.getFirstLinkpathDest = this.originalGetFirstLinkpathDest;
+
+        if (this.patchedLinkSuggest && this.originalLinkSuggestGetSuggestions) {
+            this.patchedLinkSuggest.getSuggestions = this.originalLinkSuggestGetSuggestions;
+        }
 
         this.customAliases.clear();
         this.aliasToFilePath.clear();
@@ -185,7 +168,6 @@ export default class AliasesForAliasesPlugin extends Plugin {
         for (const key of Object.keys(cache.frontmatter)) {
             if (!key.startsWith('aliases:')) continue;
 
-            // Ensure Obsidian treats this property as a list type
             this.ensureListType(key);
 
             const propertyValue = cache.frontmatter[key];
@@ -207,7 +189,7 @@ export default class AliasesForAliasesPlugin extends Plugin {
     ensureListType(property: string) {
         if (this.registeredListProperties.has(property)) return;
         try {
-            // @ts-ignore - metadataTypeManager is not in the public API
+            // @ts-ignore
             this.app.metadataTypeManager.setType(property, 'multitext');
             this.registeredListProperties.add(property);
         } catch (e) {

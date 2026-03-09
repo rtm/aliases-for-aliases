@@ -3,19 +3,71 @@ import {
     TFile,
     CachedMetadata,
     Notice,
+    EditorSuggest,
+    EditorSuggestContext,
+    EditorSuggestTriggerInfo,
+    Editor,
+    EditorPosition,
 } from 'obsidian';
 import { AliasesForAliasesSettingTab } from './settings';
+
+interface AliasSuggestion {
+    alias: string;
+    file: TFile;
+}
+
+class AliasEditorSuggest extends EditorSuggest<AliasSuggestion> {
+    private plugin: AliasesForAliasesPlugin;
+
+    constructor(plugin: AliasesForAliasesPlugin) {
+        super(plugin.app);
+        this.plugin = plugin;
+    }
+
+    onTrigger(cursor: EditorPosition, editor: Editor, _file: TFile): EditorSuggestTriggerInfo | null {
+        const line = editor.getLine(cursor.line).substring(0, cursor.ch);
+        const match = line.match(/\[\[([^\]]+)$/);
+        if (!match) return null;
+        const query = match[1];
+        return {
+            start: { line: cursor.line, ch: cursor.ch - query.length },
+            end: cursor,
+            query,
+        };
+    }
+
+    getSuggestions(context: EditorSuggestContext): AliasSuggestion[] {
+        const query = context.query.toLowerCase();
+        return Array.from(this.plugin.aliasToFilePath.entries())
+            .filter(([alias]) => alias.toLowerCase().contains(query))
+            .map(([alias, filePath]) => {
+                const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
+                if (!(file instanceof TFile)) return null;
+                return { alias, file };
+            })
+            .filter((s): s is AliasSuggestion => s !== null);
+    }
+
+    renderSuggestion(suggestion: AliasSuggestion, el: HTMLElement): void {
+        el.createEl('span', { text: suggestion.alias });
+        el.createEl('small', { text: ` — ${suggestion.file.basename}`, cls: 'suggestion-flair' });
+    }
+
+    selectSuggestion(suggestion: AliasSuggestion, _evt: MouseEvent | KeyboardEvent): void {
+        const { editor, start, end } = this.context!;
+        editor.replaceRange(`${suggestion.alias}]]`, start, end);
+    }
+}
 
 export default class AliasesForAliasesPlugin extends Plugin {
     // Store custom aliases for reference
     private customAliases: Map<string, Set<string>> = new Map();
     // Map of alias to file path for quick lookup
-    private aliasToFilePath: Map<string, string> = new Map();
+    aliasToFilePath: Map<string, string> = new Map();
     // Track property names already registered as list type
     private registeredListProperties: Set<string> = new Set();
-    // Store original metadataCache methods for restoration
+    // Store original metadataCache method for restoration
     private originalGetFirstLinkpathDest: Function;
-    private originalGetLinkSuggestions: Function;
 
     async onload() {
         console.log('Loading Aliases for Aliases plugin');
@@ -23,7 +75,10 @@ export default class AliasesForAliasesPlugin extends Plugin {
         // Add settings tab
         this.addSettingTab(new AliasesForAliasesSettingTab(this.app, this));
 
-        // Patch getFirstLinkpathDest to resolve custom aliases
+        // Register EditorSuggest for [[ autocomplete
+        this.registerEditorSuggest(new AliasEditorSuggest(this));
+
+        // Patch getFirstLinkpathDest to resolve custom aliases when links are followed
         this.originalGetFirstLinkpathDest = this.app.metadataCache.getFirstLinkpathDest.bind(this.app.metadataCache);
         // @ts-ignore - monkey patching
         this.app.metadataCache.getFirstLinkpathDest = (linkpath: string, sourcePath: string): TFile | null => {
@@ -33,30 +88,6 @@ export default class AliasesForAliasesPlugin extends Plugin {
                 if (file instanceof TFile) return file;
             }
             return this.originalGetFirstLinkpathDest(linkpath, sourcePath);
-        };
-
-        // Patch getLinkSuggestions to include custom aliases in autocomplete
-        this.originalGetLinkSuggestions = this.app.metadataCache.getLinkSuggestions.bind(this.app.metadataCache);
-        // @ts-ignore - monkey patching
-        this.app.metadataCache.getLinkSuggestions = (query: string) => {
-            const originalSuggestions = this.originalGetLinkSuggestions(query);
-            if (!query) return originalSuggestions;
-
-            const customSuggestions = Array.from(this.aliasToFilePath.entries())
-                .filter(([alias]) => alias.toLowerCase().contains(query.toLowerCase()))
-                .map(([alias, filePath]) => {
-                    const file = this.app.vault.getAbstractFileByPath(filePath);
-                    if (!(file instanceof TFile)) return null;
-                    return {
-                        file,
-                        alias,
-                        path: filePath,
-                        score: alias.toLowerCase() === query.toLowerCase() ? 1 : 0.5
-                    };
-                })
-                .filter(s => s !== null);
-
-            return [...originalSuggestions, ...customSuggestions];
         };
 
         // Register event to process files when metadata changes
@@ -78,6 +109,20 @@ export default class AliasesForAliasesPlugin extends Plugin {
             callback: () => {
                 this.refreshAliases();
                 new Notice('Custom aliases refreshed');
+            }
+        });
+
+        // Debug command: dump alias map to console
+        this.addCommand({
+            id: 'debug-aliases',
+            name: 'Debug: Dump Alias Map to Console',
+            callback: () => {
+                console.log('=== Aliases for Aliases: aliasToFilePath ===');
+                this.aliasToFilePath.forEach((filePath, alias) => {
+                    console.log(`  "${alias}" → ${filePath}`);
+                });
+                console.log(`Total: ${this.aliasToFilePath.size} aliases`);
+                new Notice(`${this.aliasToFilePath.size} custom aliases loaded — see console`);
             }
         });
 
@@ -107,11 +152,9 @@ export default class AliasesForAliasesPlugin extends Plugin {
     onunload() {
         console.log('Unloading Aliases for Aliases plugin');
 
-        // Restore original methods
+        // Restore original method
         // @ts-ignore
         this.app.metadataCache.getFirstLinkpathDest = this.originalGetFirstLinkpathDest;
-        // @ts-ignore
-        this.app.metadataCache.getLinkSuggestions = this.originalGetLinkSuggestions;
 
         this.customAliases.clear();
         this.aliasToFilePath.clear();

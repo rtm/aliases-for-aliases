@@ -111,11 +111,11 @@ export default class AliasesForAliasesPlugin extends Plugin {
         this.register(around(suggest.constructor.prototype, {
             getSuggestions(old: Function) {
                 return function (this: unknown, context: any) {
-                    const original: any[] = old.call(this, context);
+                    const result = old.call(this, context);
                     const query = (context?.query ?? '').toLowerCase();
-                    if (!query) return original;
+                    if (!query) return result;
 
-                    const custom = Array.from(plugin.aliasToFilePath.entries())
+                    const buildCustom = () => Array.from(plugin.aliasToFilePath.entries())
                         .filter(([alias]) => alias.toLowerCase().includes(query))
                         .map(([alias, filePath]) => {
                             const file = plugin.app.vault.getAbstractFileByPath(filePath);
@@ -131,7 +131,11 @@ export default class AliasesForAliasesPlugin extends Plugin {
                         })
                         .filter((s): s is NonNullable<typeof s> => s !== null);
 
-                    return [...original, ...custom];
+                    // Handle both sync and async getSuggestions
+                    if (result && typeof result.then === 'function') {
+                        return result.then((original: any[]) => [...(original ?? []), ...buildCustom()]);
+                    }
+                    return [...(result ?? []), ...buildCustom()];
                 };
             }
         }));

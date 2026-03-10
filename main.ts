@@ -121,7 +121,7 @@ export default class AliasesForAliasesPlugin extends Plugin {
                             const file = plugin.app.vault.getAbstractFileByPath(filePath);
                             if (!(file instanceof TFile)) return null;
                             return {
-                                type: 'file' as const,
+                                type: 'alias' as const,
                                 file,
                                 path: filePath,
                                 score: alias.toLowerCase() === query ? 1 : 0.5,

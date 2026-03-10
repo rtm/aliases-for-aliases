@@ -4,6 +4,7 @@ import {
     CachedMetadata,
     Notice,
 } from 'obsidian';
+import { around } from 'monkey-around';
 import { AliasesForAliasesSettingTab } from './settings';
 
 export default class AliasesForAliasesPlugin extends Plugin {
@@ -13,10 +14,8 @@ export default class AliasesForAliasesPlugin extends Plugin {
     aliasToFilePath: Map<string, string> = new Map();
     // Track property names already registered as list type
     private registeredListProperties: Set<string> = new Set();
-    // Store original methods for restoration
+    // Store original metadataCache method for restoration
     private originalGetFirstLinkpathDest: Function;
-    private originalLinkSuggestGetSuggestions: Function | null = null;
-    private patchedLinkSuggest: any = null;
 
     async onload() {
         console.log('Loading Aliases for Aliases plugin');
@@ -97,47 +96,57 @@ export default class AliasesForAliasesPlugin extends Plugin {
     }
 
     patchLinkSuggester() {
+        // The built-in link suggester is always at index 0
         // @ts-ignore
-        const suggests = this.app.workspace.editorSuggest?.suggests ?? [];
-        const linkSuggest = suggests.find((s: any) => s.constructor.name === 'LinkSuggest');
-        if (!linkSuggest) {
-            console.warn('Aliases for Aliases: could not find built-in LinkSuggest to patch');
+        const suggest = this.app.workspace.editorSuggest?.suggests?.[0];
+        if (!suggest) {
+            console.warn('Aliases for Aliases: could not find built-in link suggester');
             return;
         }
 
-        this.originalLinkSuggestGetSuggestions = linkSuggest.getSuggestions.bind(linkSuggest);
-        this.patchedLinkSuggest = linkSuggest;
+        const plugin = this;
 
-        linkSuggest.getSuggestions = (context: any) => {
-            const original: any[] = this.originalLinkSuggestGetSuggestions!(context);
-            const query = (context.query ?? '').toLowerCase();
-            if (!query) return original;
+        // Use monkey-around to safely patch the prototype — handles multiple plugins patching
+        // the same method and cleanly restores on unload via this.register()
+        this.register(around(suggest.constructor.prototype, {
+            getSuggestions(old: Function) {
+                return function (this: unknown, context: any) {
+                    const original: any[] = old.call(this, context);
+                    const query = (context?.query ?? '').toLowerCase();
+                    if (!query) return original;
 
-            const custom = Array.from(this.aliasToFilePath.entries())
-                .filter(([alias]) => alias.toLowerCase().includes(query))
-                .map(([alias, filePath]) => {
-                    const file = this.app.vault.getAbstractFileByPath(filePath);
-                    if (!(file instanceof TFile)) return null;
-                    return { file, alias, path: filePath };
-                })
-                .filter((s): s is { file: TFile, alias: string, path: string } => s !== null);
+                    const custom = Array.from(plugin.aliasToFilePath.entries())
+                        .filter(([alias]) => alias.toLowerCase().includes(query))
+                        .map(([alias, filePath]) => {
+                            const file = plugin.app.vault.getAbstractFileByPath(filePath);
+                            if (!(file instanceof TFile)) return null;
+                            return {
+                                type: 'file' as const,
+                                file,
+                                path: filePath,
+                                score: alias.toLowerCase() === query ? 1 : 0.5,
+                                matches: null,
+                                alias,
+                            };
+                        })
+                        .filter((s): s is NonNullable<typeof s> => s !== null);
 
-            return [...original, ...custom];
-        };
+                    return [...original, ...custom];
+                };
+            }
+        }));
 
-        console.log('Aliases for Aliases: patched built-in LinkSuggest');
+        console.log('Aliases for Aliases: patched built-in link suggester');
     }
 
     onunload() {
         console.log('Unloading Aliases for Aliases plugin');
 
-        // Restore original methods
+        // Restore original method
         // @ts-ignore
         this.app.metadataCache.getFirstLinkpathDest = this.originalGetFirstLinkpathDest;
 
-        if (this.patchedLinkSuggest && this.originalLinkSuggestGetSuggestions) {
-            this.patchedLinkSuggest.getSuggestions = this.originalLinkSuggestGetSuggestions;
-        }
+        // monkey-around patches registered via this.register() are cleaned up automatically
 
         this.customAliases.clear();
         this.aliasToFilePath.clear();

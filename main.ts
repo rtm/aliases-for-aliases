@@ -131,11 +131,21 @@ export default class AliasesForAliasesPlugin extends Plugin {
                         })
                         .filter((s): s is NonNullable<typeof s> => s !== null);
 
+                    const custom = buildCustom();
+                    // When we have custom results, strip Obsidian's "no match found" sentinel
+                    // (items without a file property, e.g. type:'linktext' fallbacks)
+                    const merge = (original: any[]) => {
+                        const filtered = custom.length > 0
+                            ? original.filter(item => item?.file != null)
+                            : original;
+                        return [...filtered, ...custom];
+                    };
+
                     // Handle both sync and async getSuggestions
                     if (result && typeof result.then === 'function') {
-                        return result.then((original: any[]) => [...(original ?? []), ...buildCustom()]);
+                        return result.then((original: any[]) => merge(original ?? []));
                     }
-                    return [...(result ?? []), ...buildCustom()];
+                    return merge(result ?? []);
                 };
             }
         }));

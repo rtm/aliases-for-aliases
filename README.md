@@ -51,7 +51,6 @@ Search for **Aliases for Aliases** in Settings → Community plugins.
 ## Commands
 
 - **Refresh Custom Aliases** — rebuilds the alias index from all vault files (normally not needed).
-- **Debug: Dump Alias Map to Console** — logs all registered custom aliases to the developer console.
 
 ## Notes
 

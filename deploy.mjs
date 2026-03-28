@@ -2,19 +2,20 @@ import { readFileSync, copyFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { readFile } from 'fs/promises';
 
-// Read vault path from deploy.config.json
-let config;
-try {
-    config = JSON.parse(readFileSync('deploy.config.json', 'utf8'));
-} catch (e) {
-    console.error('Error: deploy.config.json not found or invalid.');
-    console.error('Create deploy.config.json with: { "vaultPath": "/path/to/your/vault" }');
-    process.exit(1);
+// Read vault path: ~/.obsidian-dev.json (central) takes precedence, then deploy.config.json (per-repo)
+let vaultPath;
+for (const configPath of [join(process.env.HOME, '.obsidian-dev.json'), 'deploy.config.json']) {
+    try {
+        const config = JSON.parse(readFileSync(configPath, 'utf8'));
+        if (config.vaultPath) {
+            vaultPath = config.vaultPath;
+            break;
+        }
+    } catch (e) {}
 }
-
-const { vaultPath } = config;
 if (!vaultPath) {
-    console.error('Error: "vaultPath" not set in deploy.config.json');
+    console.error('Error: No vaultPath found. Set it in ~/.obsidian-dev.json or deploy.config.json');
+    console.error('Example: { "vaultPath": "/path/to/your/vault" }');
     process.exit(1);
 }
 
